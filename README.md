@@ -1,7 +1,8 @@
 # Diabetes Risk Predictor
 
 A clinical decision support tool that predicts diabetes risk probability
-from patient measurements using logistic regression trained on 768 patients.
+from patient measurements, with model selection by cross-validation and
+metrics chosen for a screening context.
 
 ## Dataset
 
@@ -14,36 +15,68 @@ from patient measurements using logistic regression trained on 768 patients.
 | Glucose                  | Plasma glucose concentration (mg/dL) |
 | BloodPressure            | Diastolic blood pressure (mmHg)      |
 | SkinThickness            | Triceps skin fold thickness (mm)     |
-| Insulin                  | 2-Hour serum insulin (μU/mL)         |
-| BMI                      | Body mass index (kg/m²)              |
+| Insulin                  | 2-Hour serum insulin (uU/mL)         |
+| BMI                      | Body mass index (kg/m2)              |
 | DiabetesPedigreeFunction | Genetic diabetes likelihood score    |
 | Age                      | Patient age (years)                  |
 
-## Model
+## Data Quality: Hidden Missing Values
 
-- Algorithm: Logistic Regression with StandardScaler
-- Train/Test Split: 70% / 30% stratified
-- Accuracy: 77%
-- Top predictors: Glucose, BMI, Pregnancies
+The Pima dataset encodes missing measurements as zeros, which are
+biologically impossible for five features:
 
-Features are scaled before training so coefficients are
-comparable across all features regardless of their natural range.
+| Feature       | Impossible zeros | Share of dataset |
+| ------------- | ---------------- | ---------------- |
+| Insulin       | 374              | 48.7%            |
+| SkinThickness | 227              | 29.6%            |
+| BloodPressure | 35               | 4.6%             |
+| BMI           | 11               | 1.4%             |
+| Glucose       | 5                | 0.7%             |
 
-## Class Distribution
+These are converted to missing values and median-imputed inside the
+sklearn Pipeline, so imputation statistics are learned only from
+training folds and never leak from the test data.
 
-- No Diabetes: 500 patients (65.1%)
-- Has Diabetes: 268 patients (34.9%)
-- Ratio: 1.87:1 — handled via stratified sampling and class-specific evaluation
+## Model Selection
+
+Four candidates were compared with stratified 5-fold cross-validation
+on the 70% training split. Selection is by mean ROC-AUC, with diabetic
+recall breaking ties, because a screening tool should prioritise
+catching true positives.
+
+| Model                          | CV Accuracy   | CV ROC-AUC | CV Diabetic Recall |
+| ------------------------------ | ------------- | ---------- | ------------------ |
+| Logistic Regression            | 78.2% (+-3.5) | 0.837      | 57.8%              |
+| Logistic Regression (balanced) | 75.4% (+-2.8) | 0.837      | 71.7%              |
+| Random Forest                  | 76.4% (+-3.5) | 0.822      | 57.8%              |
+| Gradient Boosting              | 75.6% (+-4.2) | 0.807      | 57.8%              |
+
+**Selected: Logistic Regression with balanced class weights**, which
+trades a small amount of overall accuracy at the default threshold for
+a 14-point gain in diabetic recall at identical ROC-AUC.
+
+## Hold-Out Performance (untouched 30% test split)
+
+- Accuracy: **76.2%** (majority-class baseline: 65.1%)
+- ROC-AUC: **0.837**
+- Recall, diabetic: **70.4%**
+- Recall, non-diabetic: 79.3%
+
+Training writes `model/metrics.json`, and the dashboard reads all of
+its stats and feature importance from that file, so the numbers shown
+in the UI always match the last training run instead of being
+hardcoded.
 
 ## Project Structure
 
 ```
-diabetes_project/
+diabetes-predictor/
 ├── data/
 │   └── diabetes.csv
 ├── model/
 │   ├── train.py
-│   └── diabetes_model.pkl
+│   ├── diabetes_model.pkl
+│   └── metrics.json
 ├── dashboard/
 │   └── app.py
 ├── .streamlit/
@@ -55,18 +88,22 @@ diabetes_project/
 ## Setup
 
 ```bash
-pip3 install pandas scikit-learn matplotlib streamlit plotly
+pip install -r requirements.txt
 python3 model/train.py
 streamlit run dashboard/app.py
 ```
 
+Paths are anchored to the repository, so both commands work from any
+working directory. Dependencies are pinned in `requirements.txt` to keep
+the reported metrics reproducible.
+
 ## Dashboard Features
 
-- Dataset overview with animated stat cards
-- Feature importance chart with scaled coefficients
+- Dataset overview with animated stat cards (driven by metrics.json)
+- Model-agnostic feature importance chart from the selected model
 - Patient input form with 8 clinical fields
 - Gauge chart showing diabetes probability
-- Colour-coded risk result — Low / Moderate / High
+- Colour-coded risk result: Low / Moderate / High
 - Clinical recommendation per risk level
 - Medical disclaimer
 

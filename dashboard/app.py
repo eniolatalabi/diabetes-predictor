@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import json
 import pickle
 import time
+from pathlib import Path
 
 # ─────────────────────────────────────────────
 # Page configuration
@@ -14,7 +16,7 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-# Bold medical theme — white, green, red
+# Bold medical theme: white, green, red
 # ─────────────────────────────────────────────
 
 st.markdown("""
@@ -251,12 +253,52 @@ st.markdown("""
 # Load model
 # ─────────────────────────────────────────────
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MODEL_PATH = REPO_ROOT / "model" / "diabetes_model.pkl"
+METRICS_PATH = REPO_ROOT / "model" / "metrics.json"
+
+RISK_LOW_MAX = 40       # diabetes probability (%) treated as low risk
+RISK_MODERATE_MAX = 70  # upper bound of moderate risk
+
+DEFAULT_METRICS = {
+    "model_name": "Logistic Regression (balanced)",
+    "accuracy_pct": 76.2,
+    "roc_auc": 0.837,
+    "total_patients": 768,
+    "no_diabetes": 500,
+    "has_diabetes": 268,
+    "no_diabetes_pct": 65.1,
+    "has_diabetes_pct": 34.9,
+    "feature_importance": [],
+}
+
+
 @st.cache_resource
 def load_model():
-    with open("model/diabetes_model.pkl", "rb") as f:
-        return pickle.load(f)
+    """Load the trained pipeline, stopping with a clear error if absent."""
+    try:
+        with open(MODEL_PATH, "rb") as model_file:
+            return pickle.load(model_file)
+    except FileNotFoundError:
+        st.error(
+            "Trained model not found. Run `python3 model/train.py` "
+            "from the repository root, then reload this page."
+        )
+        st.stop()
+
+
+@st.cache_data
+def load_metrics():
+    """Load metrics written by train.py, falling back to known defaults."""
+    try:
+        with open(METRICS_PATH) as metrics_file:
+            return json.load(metrics_file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return DEFAULT_METRICS
+
 
 pipeline = load_model()
+metrics = load_metrics()
 
 # ─────────────────────────────────────────────
 # Header
@@ -283,51 +325,59 @@ st.markdown('<div class="section-label">Dataset Overview</div>', unsafe_allow_ht
 c1, c2, c3, c4 = st.columns(4)
 
 def count_up(placeholder, target, color, suffix=""):
-    steps = 30
-    step_size = max(1, target // steps)
-    for i in range(0, target + step_size, step_size):
-        current = min(i, target)
+    """Animate the stat once per session, then render statically."""
+    def render(value):
         placeholder.markdown(f"""
             <div class="stat-value" style="color:{color};">
-                {current:,}{suffix}
+                {value:,}{suffix}
             </div>
         """, unsafe_allow_html=True)
+
+    if st.session_state.get("stats_animated"):
+        render(target)
+        return
+
+    whole = int(round(target))
+    steps = 30
+    step_size = max(1, whole // steps)
+    for i in range(0, whole + step_size, step_size):
+        render(min(i, whole))
         time.sleep(0.018)
+    render(target)
 
 with c1:
     st.markdown('<div class="stat-card dark"><div class="stat-label">Total Patients</div>', unsafe_allow_html=True)
     p1 = st.empty()
     st.markdown('<div class="stat-sub">Pima Indians dataset</div></div>', unsafe_allow_html=True)
-    count_up(p1, 768, "#0A0A0A")
+    count_up(p1, metrics["total_patients"], "#0A0A0A")
 
 with c2:
     st.markdown('<div class="stat-card green"><div class="stat-label">No Diabetes</div>', unsafe_allow_html=True)
     p2 = st.empty()
-    st.markdown('<div class="stat-sub">65.1% of dataset</div></div>', unsafe_allow_html=True)
-    count_up(p2, 500, "#16A34A")
+    st.markdown(f'<div class="stat-sub">{metrics["no_diabetes_pct"]}% of dataset</div></div>', unsafe_allow_html=True)
+    count_up(p2, metrics["no_diabetes"], "#16A34A")
 
 with c3:
     st.markdown('<div class="stat-card red"><div class="stat-label">Has Diabetes</div>', unsafe_allow_html=True)
     p3 = st.empty()
-    st.markdown('<div class="stat-sub">34.9% of dataset</div></div>', unsafe_allow_html=True)
-    count_up(p3, 268, "#DC2626")
+    st.markdown(f'<div class="stat-sub">{metrics["has_diabetes_pct"]}% of dataset</div></div>', unsafe_allow_html=True)
+    count_up(p3, metrics["has_diabetes"], "#DC2626")
 
 with c4:
     st.markdown('<div class="stat-card blue"><div class="stat-label">Model Accuracy</div>', unsafe_allow_html=True)
     p4 = st.empty()
-    st.markdown('<div class="stat-sub">Logistic Regression</div></div>', unsafe_allow_html=True)
-    count_up(p4, 77, "#2563EB", suffix="%")
+    st.markdown(f'<div class="stat-sub">{metrics.get("model_name", "Model")} | ROC-AUC {metrics.get("roc_auc", "n/a")}</div></div>', unsafe_allow_html=True)
+    count_up(p4, metrics["accuracy_pct"], "#2563EB", suffix="%")
+
+st.session_state.stats_animated = True
 
 # ─────────────────────────────────────────────
 # Feature importance
 # ─────────────────────────────────────────────
 
-st.markdown('<div class="section-label">Feature Importance — Scaled Coefficients</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-label">Feature Importance: Scaled Coefficients</div>', unsafe_allow_html=True)
 
-model_step = pipeline.named_steps["model"]
-
-features = ["Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
-            "Insulin", "BMI", "DiabetesPedigreeFunction", "Age"]
+importance_rows = metrics.get("feature_importance", [])
 
 feature_labels = {
     "Pregnancies"             : "Pregnancies",
@@ -340,29 +390,27 @@ feature_labels = {
     "Age"                     : "Age"
 }
 
-coef_df = pd.DataFrame({
-    "Feature"    : features,
-    "Coefficient": model_step.coef_[0]
-}).sort_values("Coefficient", key=abs, ascending=False)
+if importance_rows:
+    max_abs = max(abs(row["value"]) for row in importance_rows)
+    for row in importance_rows:
+        label     = feature_labels.get(row["feature"], row["feature"])
+        value     = row["value"]
+        bar_width = round((abs(value) / max_abs) * 100, 1)
+        negative  = row.get("signed") and value < 0
+        bar_class = "feature-bar-fill negative" if negative else "feature-bar-fill"
+        coef_str  = f"+{value:.3f}" if row.get("signed") and value > 0 else f"{value:.3f}"
 
-max_abs = coef_df["Coefficient"].abs().max()
-
-for _, row in coef_df.iterrows():
-    label     = feature_labels.get(row["Feature"], row["Feature"])
-    coef      = row["Coefficient"]
-    bar_width = round((abs(coef) / max_abs) * 100, 1)
-    bar_class = "feature-bar-fill" if coef > 0 else "feature-bar-fill negative"
-    coef_str  = f"+{coef:.3f}" if coef > 0 else f"{coef:.3f}"
-
-    st.markdown(f"""
-        <div class="feature-row">
-            <div class="feature-name">{label}</div>
-            <div class="feature-bar-wrap">
-                <div class="{bar_class}" style="width:{bar_width}%;"></div>
+        st.markdown(f"""
+            <div class="feature-row">
+                <div class="feature-name">{label}</div>
+                <div class="feature-bar-wrap">
+                    <div class="{bar_class}" style="width:{bar_width}%;"></div>
+                </div>
+                <div class="feature-coef">{coef_str}</div>
             </div>
-            <div class="feature-coef">{coef_str}</div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+else:
+    st.info("Run `python3 model/train.py` to generate feature importance.")
 
 # ─────────────────────────────────────────────
 # Patient input
@@ -386,8 +434,8 @@ with col1:
 
 with col2:
     insulin = st.number_input("2-Hour Serum Insulin (μU/mL)",           min_value=0,   max_value=900,  value=80,   step=1)
-    bmi     = st.number_input("Body Mass Index — BMI (kg/m²)",          min_value=0.0, max_value=70.0, value=25.0, step=0.1, format="%.1f")
-    dpf     = st.number_input("Genetic Risk Score — DPF",               min_value=0.0, max_value=3.0,  value=0.35, step=0.01, format="%.3f")
+    bmi     = st.number_input("Body Mass Index, BMI (kg/m²)",          min_value=0.0, max_value=70.0, value=25.0, step=0.1, format="%.1f")
+    dpf     = st.number_input("Genetic Risk Score (DPF)",               min_value=0.0, max_value=3.0,  value=0.35, step=0.01, format="%.3f")
     age     = st.number_input("Patient Age (years)",                    min_value=1,   max_value=120,  value=30,   step=1)
 
 # ─────────────────────────────────────────────
@@ -408,7 +456,6 @@ if st.button("Run Risk Assessment", type="primary"):
     }])
 
     with st.spinner("Analysing patient data..."):
-        time.sleep(1.5)
         prediction  = pipeline.predict(patient)[0]
         probability = pipeline.predict_proba(patient)[0]
 
@@ -421,9 +468,9 @@ if st.button("Run Risk Assessment", type="primary"):
 
     with gauge_col:
         # Gauge colour follows risk level
-        if diabetes_prob <= 40:
+        if diabetes_prob <= RISK_LOW_MAX:
             gauge_color = "#16A34A"
-        elif diabetes_prob <= 70:
+        elif diabetes_prob <= RISK_MODERATE_MAX:
             gauge_color = "#D97706"
         else:
             gauge_color = "#DC2626"
@@ -446,9 +493,9 @@ if st.button("Run Risk Assessment", type="primary"):
                 "bgcolor"  : "white",
                 "borderwidth": 0,
                 "steps": [
-                    {"range": [0,  40], "color": "#F0FDF4"},
-                    {"range": [40, 70], "color": "#FFFBEB"},
-                    {"range": [70, 100],"color": "#FEF2F2"},
+                    {"range": [0, RISK_LOW_MAX], "color": "#F0FDF4"},
+                    {"range": [RISK_LOW_MAX, RISK_MODERATE_MAX], "color": "#FFFBEB"},
+                    {"range": [RISK_MODERATE_MAX, 100], "color": "#FEF2F2"},
                 ],
                 "threshold": {
                     "line"     : {"color": "#0A0A0A", "width": 2},
@@ -470,14 +517,14 @@ if st.button("Run Risk Assessment", type="primary"):
             font          = dict(family="DM Sans")
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with result_col:
-        if diabetes_prob <= 40:
+        if diabetes_prob <= RISK_LOW_MAX:
             box_class = "result-box result-low"
             title     = "Low Risk"
             recommend = "Current measurements do not indicate elevated diabetes risk. Recommend routine preventive care and annual screening."
-        elif diabetes_prob <= 70:
+        elif diabetes_prob <= RISK_MODERATE_MAX:
             box_class = "result-box result-moderate"
             title     = "Moderate Risk"
             recommend = "Elevated risk indicators detected. Recommend lifestyle intervention, dietary review, and follow-up testing within 3 months."

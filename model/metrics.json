@@ -1,0 +1,92 @@
+{
+  "model_name": "Logistic Regression (balanced)",
+  "accuracy_pct": 76.2,
+  "roc_auc": 0.837,
+  "recall_diabetic_pct": 70.4,
+  "recall_healthy_pct": 79.3,
+  "baseline_accuracy_pct": 65.1,
+  "cv_results": {
+    "Logistic Regression": {
+      "cv_accuracy_mean": 78.2,
+      "cv_accuracy_std": 3.5,
+      "cv_roc_auc_mean": 0.837,
+      "cv_roc_auc_std": 0.032,
+      "cv_recall_diabetic_mean": 57.8
+    },
+    "Logistic Regression (balanced)": {
+      "cv_accuracy_mean": 75.4,
+      "cv_accuracy_std": 2.8,
+      "cv_roc_auc_mean": 0.837,
+      "cv_roc_auc_std": 0.032,
+      "cv_recall_diabetic_mean": 71.7
+    },
+    "Random Forest": {
+      "cv_accuracy_mean": 76.4,
+      "cv_accuracy_std": 3.5,
+      "cv_roc_auc_mean": 0.822,
+      "cv_roc_auc_std": 0.04,
+      "cv_recall_diabetic_mean": 57.8
+    },
+    "Gradient Boosting": {
+      "cv_accuracy_mean": 75.6,
+      "cv_accuracy_std": 4.2,
+      "cv_roc_auc_mean": 0.807,
+      "cv_roc_auc_std": 0.044,
+      "cv_recall_diabetic_mean": 57.8
+    }
+  },
+  "zero_values_imputed": {
+    "Glucose": 5,
+    "BloodPressure": 35,
+    "SkinThickness": 227,
+    "Insulin": 374,
+    "BMI": 11
+  },
+  "feature_importance": [
+    {
+      "feature": "Glucose",
+      "value": 1.1308,
+      "signed": true
+    },
+    {
+      "feature": "BMI",
+      "value": 0.7588,
+      "signed": true
+    },
+    {
+      "feature": "Pregnancies",
+      "value": 0.4614,
+      "signed": true
+    },
+    {
+      "feature": "DiabetesPedigreeFunction",
+      "value": 0.2683,
+      "signed": true
+    },
+    {
+      "feature": "Age",
+      "value": 0.1347,
+      "signed": true
+    },
+    {
+      "feature": "SkinThickness",
+      "value": -0.1083,
+      "signed": true
+    },
+    {
+      "feature": "Insulin",
+      "value": -0.0218,
+      "signed": true
+    },
+    {
+      "feature": "BloodPressure",
+      "value": -0.0169,
+      "signed": true
+    }
+  ],
+  "total_patients": 768,
+  "no_diabetes": 500,
+  "has_diabetes": 268,
+  "no_diabetes_pct": 65.1,
+  "has_diabetes_pct": 34.9
+}
